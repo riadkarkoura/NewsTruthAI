@@ -5,13 +5,16 @@ import re
 import nltk
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
-from translate import Translator
+from deep_translator import GoogleTranslator
 from transformers import pipeline
 
 nltk.download('stopwords')
 
-translator = Translator(to_lang="en", from_lang="ar")
-classifier = pipeline("text-classification", model="mrm8488/bert-tiny-finetuned-fake-news")
+# استخدم deep_translator بدل translate القديم
+translator = GoogleTranslator(source='auto', target='en')
+
+# استخدم نموذج متاح وحديث
+classifier = pipeline("text-classification", model="microsoft/xtremedistil-l6-h384-uncased")
 
 stop_words = set(stopwords.words('english'))
 stemmer = PorterStemmer()
@@ -49,7 +52,7 @@ def classify_arabic_news(text):
         result = classifier(translated)[0]
         label = result['label']
         score = result['score']
-        final_label = "خبر حقيقي ✅" if label.lower() == "real" else "خبر كاذب ❌"
+        final_label = "خبر حقيقي ✅" if label.upper() == "REAL" or label.upper() == "LABEL_1" else "خبر كاذب ❌"
         return final_label, translated, score
     except Exception as e:
         return f"Error: {e}", "", 0
@@ -65,7 +68,7 @@ if api_key:
 
     if st.button("📡 جلب وتصنيف الأخبار الحديثة"):
         lang = "ar" if any('\u0600' <= c <= '\u06FF' for c in query) else "en"
-        news_items = get_latest_news(api_key, query="Syria OR vaccine", language="en", page_size=5)
+        news_items = get_latest_news(api_key, query=query, language=lang, page_size=5)
 
         st.subheader("🗞️ الأخبار المصنفة:")
         for i, news in enumerate(news_items, 1):
@@ -73,13 +76,13 @@ if api_key:
                 label, translated, score = classify_arabic_news(news)
             else:
                 result = classifier(news)[0]
-                label = "خبر حقيقي ✅" if result['label'].lower() == "real" else "خبر كاذب ❌"
+                label = "خبر حقيقي ✅" if result['label'].upper() == "REAL" or result['label'].upper() == "LABEL_1" else "خبر كاذب ❌"
                 translated, score = "", result['score']
 
             st.markdown(f"**{i}. الخبر:** {news}")
             if translated:
                 st.markdown(f"*الترجمة:* {translated}")
-            st.markdown(f"🔎 **النتيجة:** {label} (الثقة: {score:.2f})")
+            st.markdown(f"🔎 **النتيجة:** {label} (الثقة: {score:.2%})")
             st.write("---")
 
     st.subheader("✍️ تصنيف خبر عربي يدوي:")
@@ -89,7 +92,7 @@ if api_key:
         if user_input.strip():
             label, translated, score = classify_arabic_news(user_input)
             st.markdown(f"**🔄 الترجمة:** {translated}")
-            st.markdown(f"**🔍 التصنيف:** {label} (الثقة: {score:.2f})")
+            st.markdown(f"**🔍 التصنيف:** {label} (الثقة: {score:.2%})")
         else:
             st.warning("يرجى إدخال نص أولاً.")
 
