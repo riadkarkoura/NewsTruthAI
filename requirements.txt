@@ -6,3 +6,4 @@ transformers
 torch
 translate
 scikit-learn
+deep-translator
