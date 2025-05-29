@@ -7,3 +7,4 @@ torch
 translate
 scikit-learn
 deep-translator
+pyairtable
