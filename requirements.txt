@@ -8,3 +8,4 @@ translate
 scikit-learn
 deep-translator
 pyairtable
+vaderSentiment
