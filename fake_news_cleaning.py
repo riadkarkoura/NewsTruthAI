@@ -1,6 +1,5 @@
 import streamlit as st
 import requests
-import pandas as pd
 import re
 import nltk
 import csv
@@ -13,11 +12,11 @@ nltk.download('stopwords')
 
 translator = GoogleTranslator(source='auto', target='en')
 
-# استخدمنا نموذج أبسط معروف بتوافقه في البيئات الخفيفة
+# استخدام نموذج تصنيف نصوص مستقر وموثوق (distilbert-base-uncased-finetuned-sst-2-english) وتشغيله على CPU
 classifier = pipeline(
-    "text-classification", 
+    "sentiment-analysis",
     model="distilbert-base-uncased-finetuned-sst-2-english",
-    device=-1  # استخدام CPU فقط لتجنب مشاكل PyTorch في البيئات السحابية
+    device=-1
 )
 
 stop_words = set(stopwords.words('english'))
@@ -56,10 +55,11 @@ def classify_arabic_news(text):
         result = classifier(translated)[0]
         label = result['label']
         score = result['score']
-        final_label = "خبر حقيقي ✅" if label.upper() in ["POSITIVE", "LABEL_1"] else "خبر كاذب ❌"
+        # تحويل نتائج sentiment إلى تصنيف أخبار حقيقي أو كاذب بناء على نتائج النموذج
+        final_label = "خبر حقيقي ✅" if label.upper() == "POSITIVE" else "خبر كاذب ❌"
         return final_label, translated, score, label
     except Exception as e:
-        return f"Error: {e}", "", 0, ""
+        return f"Error: {str(e)}", "", 0, ""
 
 def save_feedback(news, predicted_label, feedback):
     with open("feedback.csv", "a", newline='', encoding="utf-8") as f:
@@ -75,6 +75,7 @@ if api_key:
     query = st.text_input("🔍 اكتب كلمة بحث (مثال: سوريا، سياسة، لقاح):", value="Syria OR vaccine")
 
     if st.button("📡 جلب وتصنيف الأخبار الحديثة"):
+        # اكتشاف اللغة بناء على وجود حروف عربية أو لا
         lang = "ar" if any('\u0600' <= c <= '\u06FF' for c in query) else "en"
         news_items = get_latest_news(api_key, query=query, language=lang, page_size=5)
 
@@ -83,10 +84,14 @@ if api_key:
             if lang == "ar":
                 label, translated, score, raw_label = classify_arabic_news(news)
             else:
-                result = classifier(news)[0]
-                raw_label = result['label']
-                label = "خبر حقيقي ✅" if raw_label.upper() in ["POSITIVE", "LABEL_1"] else "خبر كاذب ❌"
-                translated, score = "", result['score']
+                try:
+                    result = classifier(news)[0]
+                    raw_label = result['label']
+                    label = "خبر حقيقي ✅" if raw_label.upper() == "POSITIVE" else "خبر كاذب ❌"
+                    translated, score = "", result['score']
+                except Exception as e:
+                    label = f"Error: {str(e)}"
+                    translated, score, raw_label = "", 0, ""
 
             st.markdown(f"**{i}. الخبر:** {news}")
             if translated:
