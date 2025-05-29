@@ -1,17 +1,21 @@
 import streamlit as st
 import requests
+import pandas as pd
 import re
 import nltk
+import csv
+import os
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 from deep_translator import GoogleTranslator
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-import csv
+from transformers import pipeline
 
+# تحميل بيانات NLTK
 nltk.download('stopwords')
 
+# إعدادات الترجمة والنموذج
 translator = GoogleTranslator(source='auto', target='en')
-analyzer = SentimentIntensityAnalyzer()
+classifier = pipeline("text-classification", model="microsoft/xtremedistil-l6-h384-uncased", device=-1)  # اجبار على استخدام CPU
 
 stop_words = set(stopwords.words('english'))
 stemmer = PorterStemmer()
@@ -43,27 +47,25 @@ def get_latest_news(api_key, query="news", language="en", page_size=5):
         st.error("Error fetching news: " + data.get('message', 'Unknown error'))
         return []
 
-def classify_text_with_vader(text):
+def classify_arabic_news(text):
     try:
         translated = translator.translate(text)
-        scores = analyzer.polarity_scores(translated)
-        compound = scores['compound']
-        # اذا النتيجة موجبة فهي ايجابية (خبر حقيقي)، اذا سالبة فهي خبر كاذب
-        if compound >= 0.05:
-            label = "خبر حقيقي ✅"
-        elif compound <= -0.05:
-            label = "خبر كاذب ❌"
-        else:
-            label = "خبر غير واضح 🤔"
-        return label, translated, compound
+        result = classifier(translated)[0]
+        label = result['label']
+        score = float(result['score'])
+        final_label = "خبر حقيقي ✅" if label.upper() == "REAL" or label.upper() == "LABEL_1" else "خبر كاذب ❌"
+        return final_label, translated, score, label
     except Exception as e:
-        return f"Error: {str(e)}", "", 0
+        return f"Error: {e}", "", 0, ""
 
 def save_feedback(news, predicted_label, feedback):
-    with open("feedback.csv", "a", newline='', encoding="utf-8") as f:
+    os.makedirs("data", exist_ok=True)
+    file_path = "data/feedback.csv"
+    with open(file_path, "a", newline='', encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow([news, predicted_label, feedback])
 
+# إعداد واجهة Streamlit
 st.set_page_config(page_title="NewsTruth AI", layout="wide")
 st.title("📰 NewsTruth AI – تصنيف الأخبار العربية والإنجليزية")
 
@@ -78,21 +80,28 @@ if api_key:
 
         st.subheader("🗞️ الأخبار المصنفة:")
         for i, news in enumerate(news_items, 1):
-            label, translated, score = classify_text_with_vader(news)
+            if lang == "ar":
+                label, translated, score, raw_label = classify_arabic_news(news)
+            else:
+                result = classifier(news)[0]
+                raw_label = result['label']
+                score = float(result['score'])
+                label = "خبر حقيقي ✅" if raw_label.upper() == "REAL" or raw_label.upper() == "LABEL_1" else "خبر كاذب ❌"
+                translated = ""
 
             st.markdown(f"**{i}. الخبر:** {news}")
             if translated:
                 st.markdown(f"*الترجمة:* {translated}")
-            st.markdown(f"🔎 **النتيجة:** {label} (درجة الثقة: {score:.2f})")
+            st.markdown(f"🔎 **النتيجة:** {label} (الثقة: {score:.2%})")
 
             col1, col2 = st.columns(2)
             with col1:
                 if st.button(f"✅ التصنيف صحيح (خبر {i})"):
-                    save_feedback(news, label, "correct")
+                    save_feedback(news, raw_label, "correct")
                     st.success("تم حفظ التقييم كتصنيف صحيح.")
             with col2:
                 if st.button(f"❌ التصنيف خاطئ (خبر {i})"):
-                    save_feedback(news, label, "wrong")
+                    save_feedback(news, raw_label, "wrong")
                     st.warning("تم حفظ التقييم كتصنيف خاطئ.")
             st.write("---")
 
@@ -101,18 +110,18 @@ if api_key:
 
     if st.button("تحليل الخبر"):
         if user_input.strip():
-            label, translated, score = classify_text_with_vader(user_input)
+            label, translated, score, raw_label = classify_arabic_news(user_input)
             st.markdown(f"**🔄 الترجمة:** {translated}")
-            st.markdown(f"**🔍 التصنيف:** {label} (درجة الثقة: {score:.2f})")
+            st.markdown(f"**🔍 التصنيف:** {label} (الثقة: {score:.2%})")
 
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("✅ التصنيف صحيح (الخبر اليدوي)"):
-                    save_feedback(user_input, label, "correct")
+                    save_feedback(user_input, raw_label, "correct")
                     st.success("تم حفظ التقييم كتصنيف صحيح.")
             with col2:
                 if st.button("❌ التصنيف خاطئ (الخبر اليدوي)"):
-                    save_feedback(user_input, label, "wrong")
+                    save_feedback(user_input, raw_label, "wrong")
                     st.warning("تم حفظ التقييم كتصنيف خاطئ.")
         else:
             st.warning("يرجى إدخال نص أولاً.")
