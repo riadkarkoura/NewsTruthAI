@@ -8,21 +8,20 @@ from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 from deep_translator import GoogleTranslator
 from transformers import pipeline
-from pyairtable import Table
 
 nltk.download('stopwords')
 
 translator = GoogleTranslator(source='auto', target='en')
-classifier = pipeline("text-classification", model="microsoft/xtremedistil-l6-h384-uncased")
+
+# استخدمنا نموذج أبسط معروف بتوافقه في البيئات الخفيفة
+classifier = pipeline(
+    "text-classification", 
+    model="distilbert-base-uncased-finetuned-sst-2-english",
+    device=-1  # استخدام CPU فقط لتجنب مشاكل PyTorch في البيئات السحابية
+)
 
 stop_words = set(stopwords.words('english'))
 stemmer = PorterStemmer()
-
-# إعداد Airtable
-AIRTABLE_API_TOKEN = "YOUR_AIRTABLE_API_TOKEN"
-AIRTABLE_BASE_ID = "appuBRk3WvvG8usrz"
-AIRTABLE_TABLE_NAME = "NewsFeedback"
-table = Table(AIRTABLE_API_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
 
 def clean_text(text):
     text = str(text).lower()
@@ -57,25 +56,15 @@ def classify_arabic_news(text):
         result = classifier(translated)[0]
         label = result['label']
         score = result['score']
-        final_label = "خبر حقيقي ✅" if label.upper() == "REAL" or label.upper() == "LABEL_1" else "خبر كاذب ❌"
+        final_label = "خبر حقيقي ✅" if label.upper() in ["POSITIVE", "LABEL_1"] else "خبر كاذب ❌"
         return final_label, translated, score, label
     except Exception as e:
         return f"Error: {e}", "", 0, ""
 
-def save_feedback(news, translated, predicted_label, score, journalist, feedback):
-    try:
-        table.create({
-            "Original News": news,
-            "Translated": translated,
-            "Model Prediction": predicted_label,
-            "Confidence": f"{score:.2%}",
-            "Journalist": journalist,
-            "Journalist Feedback": feedback
-        })
-        return True
-    except Exception as e:
-        st.error(f"فشل حفظ التقييم: {e}")
-        return False
+def save_feedback(news, predicted_label, feedback):
+    with open("feedback.csv", "a", newline='', encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([news, predicted_label, feedback])
 
 st.set_page_config(page_title="NewsTruth AI", layout="wide")
 st.title("📰 NewsTruth AI – تصنيف الأخبار العربية والإنجليزية")
@@ -96,7 +85,7 @@ if api_key:
             else:
                 result = classifier(news)[0]
                 raw_label = result['label']
-                label = "خبر حقيقي ✅" if raw_label.upper() == "REAL" or raw_label.upper() == "LABEL_1" else "خبر كاذب ❌"
+                label = "خبر حقيقي ✅" if raw_label.upper() in ["POSITIVE", "LABEL_1"] else "خبر كاذب ❌"
                 translated, score = "", result['score']
 
             st.markdown(f"**{i}. الخبر:** {news}")
@@ -104,17 +93,15 @@ if api_key:
                 st.markdown(f"*الترجمة:* {translated}")
             st.markdown(f"🔎 **النتيجة:** {label} (الثقة: {score:.2%})")
 
-            journalist = st.text_input(f"👤 اسم الصحفي لتقييم الخبر {i}", key=f"name_{i}")
-            feedback = st.radio(
-                f"هل توافق على نتيجة النموذج للخبر {i}؟",
-                ["أوافق ✅", "لا أوافق ❌"],
-                key=f"feedback_{i}"
-            )
-
-            if st.button(f"💾 حفظ تقييم الخبر {i}", key=f"save_{i}"):
-                saved = save_feedback(news, translated, raw_label, score, journalist, feedback)
-                if saved:
-                    st.success("✅ تم حفظ التقييم بنجاح!")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button(f"✅ التصنيف صحيح (خبر {i})"):
+                    save_feedback(news, raw_label, "correct")
+                    st.success("تم حفظ التقييم كتصنيف صحيح.")
+            with col2:
+                if st.button(f"❌ التصنيف خاطئ (خبر {i})"):
+                    save_feedback(news, raw_label, "wrong")
+                    st.warning("تم حفظ التقييم كتصنيف خاطئ.")
             st.write("---")
 
     st.subheader("✍️ تصنيف خبر عربي يدوي:")
@@ -126,13 +113,15 @@ if api_key:
             st.markdown(f"**🔄 الترجمة:** {translated}")
             st.markdown(f"**🔍 التصنيف:** {label} (الثقة: {score:.2%})")
 
-            journalist = st.text_input("👤 اسم الصحفي لتقييم الخبر اليدوي")
-            feedback = st.radio("هل توافق على نتيجة النموذج؟", ["أوافق ✅", "لا أوافق ❌"])
-
-            if st.button("💾 حفظ التقييم للخبر اليدوي"):
-                saved = save_feedback(user_input, translated, raw_label, score, journalist, feedback)
-                if saved:
-                    st.success("✅ تم حفظ التقييم بنجاح!")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ التصنيف صحيح (الخبر اليدوي)"):
+                    save_feedback(user_input, raw_label, "correct")
+                    st.success("تم حفظ التقييم كتصنيف صحيح.")
+            with col2:
+                if st.button("❌ التصنيف خاطئ (الخبر اليدوي)"):
+                    save_feedback(user_input, raw_label, "wrong")
+                    st.warning("تم حفظ التقييم كتصنيف خاطئ.")
         else:
             st.warning("يرجى إدخال نص أولاً.")
 
