@@ -122,4 +122,11 @@ if api_key:
             label, translated = classify_arabic_news(user_arabic_input)
             st.markdown(f"**النص المترجم:** {translated}")
             st.markdown(f"**تصنيف الخبر:** {label}")
+    import streamlit as st
+
+# --- عرض معلومات الصحفي في الشريط الجانبي ---
+st.sidebar.markdown("## 👤 Riad Karkoura")
+st.sidebar.markdown("**Tech Journalist | متخصص في الذكاء الاصطناعي في الإعلام والتحقق من الأخبار**")
+
+st.sidebar.markdown("[🔗 حسابي على LinkedIn](https://www.linkedin.com/in/riad-karkoura-b9010b196)")
 
