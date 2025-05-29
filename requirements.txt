@@ -1,5 +1,8 @@
 streamlit
-scikit-learn
-nltk
-translate
 requests
+pandas
+nltk
+transformers
+torch
+translate
+scikit-learn
