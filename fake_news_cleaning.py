@@ -198,15 +198,6 @@ class NewsClassifierApp:
                 confidence,
                 feedback
             ]
-            import pdfplumber
-
-with pdfplumber.open("Identify good user experience_FoodieLand.pdf") as pdf:
-    all_text = ""
-    for page in pdf.pages:
-        all_text += page.extract_text() + "\n"
-
-print(all_text)
-
             with open("data/feedback.csv", "a", newline='', encoding="utf-8") as f:
                 writer = csv.writer(f)
                 writer.writerow(feedback_data)
@@ -252,7 +243,30 @@ print(all_text)
                             st.warning("تم حفظ التقييم كخاطئ!")
                 
                 st.divider()
-    
+    def save_feedback(self, original_text: str, translated_text: str, predicted_label: str, confidence: float, feedback: str):
+    try:
+        timestamp = datetime.now().isoformat()
+        feedback_data = [
+            timestamp,
+            original_text[:500],
+            translated_text[:500],
+            predicted_label,
+            confidence,
+            feedback
+        ]
+
+        with open("data/feedback.csv", "a", newline='', encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(feedback_data)
+
+        logger.info(f"Feedback saved: {feedback}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error saving feedback: {e}")
+        st.error("Failed to save feedback. Please try again.")
+        return False
+
     def classify_csv(self, df: pd.DataFrame, text_column: str) -> pd.DataFrame:
         """Classify news in CSV file and add results columns"""
         if text_column not in df.columns:
