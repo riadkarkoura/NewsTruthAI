@@ -40,9 +40,10 @@ class NewsClassifierApp:
         """Initialize translation and classification models"""
         try:
             self.translator = GoogleTranslator(source='auto', target='en')
+            # استخدام موديل مصمم لتصنيف الأخبار الحقيقي/الكاذب
             self.classifier = pipeline(
                 "text-classification",
-                model="unitary/toxic-bert",
+                model="mrm8488/bert-tiny-finetuned-fake-news",
                 device=-1,
                 return_all_scores=False
             )
@@ -111,29 +112,20 @@ class NewsClassifierApp:
             if not cleaned_text:
                 return "Error: Empty text after cleaning", "", 0.0, "ERROR"
             translated_text = self.translate_text(text)
-            result = self.classifier(translated_text[:512])
+            input_text = translated_text[:512]
+            result = self.classifier(input_text)
             if isinstance(result, list):
                 result = result[0]
             label = result.get('label', 'UNKNOWN')
             confidence = float(result.get('score', 0.0))
-            is_real = self.map_label_to_real(label, confidence)
+            # في موديل mrm8488:
+            # labels: 'FAKE' أو 'REAL'
+            is_real = label.upper() == "REAL"
             display_label = "خبر حقيقي ✅" if is_real else "خبر كاذب ❌"
             return display_label, translated_text, confidence, label
         except Exception as e:
             logger.error(f"Classification error: {e}")
             return f"Error: {str(e)}", "", 0.0, "ERROR"
-
-    def map_label_to_real(self, label: str, confidence: float) -> bool:
-        """Map model labels to real/fake classification"""
-        label = label.upper()
-        fake_labels = ['TOXIC', 'NEGATIVE', 'FAKE', 'LABEL_0']
-        real_labels = ['NON_TOXIC', 'POSITIVE', 'REAL', 'LABEL_1']
-        if label in fake_labels:
-            return False
-        elif label in real_labels:
-            return True
-        else:
-            return confidence > 0.7
 
     def get_latest_news(self, api_key: str, query: str = "news", language: str = "en", page_size: int = 5) -> List[str]:
         try:
@@ -269,56 +261,32 @@ class NewsClassifierApp:
 
         app = self
 
-        tabs = st.tabs(["🔍 تحليل الأخبار المباشر", "✍️ تحليل نص يدوي", "📁 تحميل ملف CSV"])
+        st.markdown("## ⚙️ تصنيف الأخبار من NewsAPI")
+        if news_api_key:
+            news_items = app.get_latest_news(news_api_key, news_query, news_language, news_count)
+            app.display_news_classification(news_items)
+        else:
+            st.info("يرجى إدخال مفتاح NewsAPI لتحميل الأخبار.")
 
-        # تبويب 1: تحميل وتصنيف الأخبار من NewsAPI
-        with tabs[0]:
-            st.header("أخبار من الإنترنت (NewsAPI)")
-            if not news_api_key:
-                st.warning("يرجى إدخال مفتاح NewsAPI في الشريط الجانبي لتحميل الأخبار.")
-            else:
-                news_items = app.get_latest_news(news_api_key, news_query, news_language, news_count)
-                app.display_news_classification(news_items)
-
-        # تبويب 2: تحليل نص يدوي
-        with tabs[1]:
-            st.header("✍️ تحليل نص يدوي")
-            input_text = st.text_area("أدخل نص الخبر هنا", height=150)
-            if st.button("تصنيف الخبر"):
-                if not input_text.strip():
-                    st.error("الرجاء إدخال نص لتحليله.")
-                else:
-                    label, translated, confidence, raw_label = app.classify_news(input_text)
-                    if translated and translated != input_text:
-                        st.markdown(f"**الترجمة:** {translated}")
-                    if "حقيقي" in label:
-                        st.success(f"🔎 النتيجة: {label} (الثقة: {confidence:.1%})")
-                    else:
-                        st.error(f"🔎 النتيجة: {label} (الثقة: {confidence:.1%})")
-
-        # تبويب 3: تحميل ملف CSV وتحليل عمود نص
-        with tabs[2]:
-            st.header("📁 تحميل ملف CSV")
-            uploaded_file = st.file_uploader("اختر ملف CSV", type=["csv"])
-            if uploaded_file:
-                try:
-                    df = pd.read_csv(uploaded_file)
-                    st.dataframe(df.head())
-                    text_cols = df.columns.tolist()
-                    selected_col = st.selectbox("اختر عمود النص في CSV", text_cols)
-                    if st.button("تصنيف الأخبار في الملف"):
-                        with st.spinner("جاري تصنيف الأخبار..."):
-                            result_df = app.classify_csv(df, selected_col)
-                            st.dataframe(result_df.head())
-                            csv_data = result_df.to_csv(index=False).encode('utf-8')
-                            st.download_button(
-                                label="⬇️ تحميل الملف مع التصنيفات",
-                                data=csv_data,
-                                file_name="classified_news.csv",
-                                mime="text/csv"
-                            )
-                except Exception as e:
-                    st.error(f"خطأ في قراءة الملف: {e}")
+        st.markdown("---")
+        st.markdown("## 📄 تصنيف ملف CSV يحتوي على أخبار")
+        uploaded_file = st.file_uploader("اختر ملف CSV", type="csv")
+        if uploaded_file:
+            df = pd.read_csv(uploaded_file)
+            st.dataframe(df.head())
+            text_column = st.selectbox("اختر عمود النص", options=df.columns)
+            if st.button("🔍 تصنيف الأخبار في الملف"):
+                with st.spinner("يتم تصنيف الأخبار... يرجى الانتظار"):
+                    df_classified = app.classify_csv(df, text_column)
+                    st.success("تم التصنيف!")
+                    st.dataframe(df_classified)
+                    csv = df_classified.to_csv(index=False).encode('utf-8-sig')
+                    st.download_button(
+                        label="⬇️ تحميل النتائج CSV",
+                        data=csv,
+                        file_name="classified_news.csv",
+                        mime="text/csv"
+                    )
 
 if __name__ == "__main__":
     app = NewsClassifierApp()
