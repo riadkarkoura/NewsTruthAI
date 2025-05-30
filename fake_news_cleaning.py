@@ -7,12 +7,11 @@ import csv
 import os
 import logging
 from datetime import datetime
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 from deep_translator import GoogleTranslator
 from transformers import pipeline
-import torch
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -41,11 +40,10 @@ class NewsClassifierApp:
         """Initialize translation and classification models"""
         try:
             self.translator = GoogleTranslator(source='auto', target='en')
-            # Use a more reliable model with explicit device configuration
             self.classifier = pipeline(
                 "text-classification", 
                 model="unitary/toxic-bert",
-                device=-1,  # Force CPU usage
+                device=-1,
                 return_all_scores=False
             )
             logger.info("Models initialized successfully")
@@ -59,7 +57,6 @@ class NewsClassifierApp:
         """Create necessary directories"""
         os.makedirs("data", exist_ok=True)
         
-        # Initialize feedback CSV with headers if it doesn't exist
         feedback_file = "data/feedback.csv"
         if not os.path.exists(feedback_file):
             with open(feedback_file, "w", newline='', encoding="utf-8") as f:
@@ -73,9 +70,9 @@ class NewsClassifierApp:
         
         try:
             text = str(text).lower()
-            text = re.sub(r'\d+', '', text)  # Remove numbers
-            text = re.sub(r'[^\w\s]', '', text)  # Remove punctuation
-            text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
+            text = re.sub(r'\d+', '', text)
+            text = re.sub(r'[^\w\s]', '', text)
+            text = re.sub(r'\s+', ' ', text)
             
             words = text.split()
             words = [word for word in words if word not in self.stop_words and len(word) > 2]
@@ -92,7 +89,6 @@ class NewsClassifierApp:
             return text
         
         try:
-            # Check if text is already in English (basic check)
             if self.is_english(text):
                 return text
             
@@ -105,7 +101,6 @@ class NewsClassifierApp:
     def is_english(self, text: str) -> bool:
         """Basic check if text is in English"""
         try:
-            # Simple heuristic: if most characters are ASCII, assume English
             ascii_chars = sum(1 for c in text if ord(c) < 128)
             return ascii_chars / len(text) > 0.8
         except:
@@ -117,16 +112,13 @@ class NewsClassifierApp:
             return "Error: Model not available", "", 0.0, "ERROR"
         
         try:
-            # Clean and prepare text
             cleaned_text = self.clean_text(text)
             if not cleaned_text:
                 return "Error: Empty text after cleaning", "", 0.0, "ERROR"
             
-            # Translate if needed
             translated_text = self.translate_text(text)
             
-            # Classify the text
-            result = self.classifier(translated_text[:512])  # Limit text length
+            result = self.classifier(translated_text[:512])
             
             if isinstance(result, list):
                 result = result[0]
@@ -134,7 +126,6 @@ class NewsClassifierApp:
             label = result.get('label', 'UNKNOWN')
             confidence = float(result.get('score', 0.0))
             
-            # Map labels to our classification system
             is_real = self.map_label_to_real(label, confidence)
             display_label = "خبر حقيقي ✅" if is_real else "خبر كاذب ❌"
             
@@ -148,7 +139,6 @@ class NewsClassifierApp:
         """Map model labels to real/fake classification"""
         label = label.upper()
         
-        # Different models use different labels
         fake_labels = ['TOXIC', 'NEGATIVE', 'FAKE', 'LABEL_0']
         real_labels = ['NON_TOXIC', 'POSITIVE', 'REAL', 'LABEL_1']
         
@@ -157,11 +147,9 @@ class NewsClassifierApp:
         elif label in real_labels:
             return True
         else:
-            # Default to real if confidence is high, fake if low
             return confidence > 0.7
     
     def get_latest_news(self, api_key: str, query: str = "news", language: str = "en", page_size: int = 5) -> List[str]:
-        """Fetch latest news from NewsAPI"""
         try:
             url = (
                 'https://newsapi.org/v2/everything?'
@@ -180,21 +168,17 @@ class NewsClassifierApp:
             if data['status'] == 'ok':
                 articles = data['articles']
                 news_items = []
-                
                 for article in articles:
                     title = article.get('title', '')
                     description = article.get('description', '')
                     content = f"{title}. {description}" if description else title
-                    
                     if content and content.strip():
                         news_items.append(content.strip())
-                
                 return news_items
             else:
                 error_msg = data.get('message', 'Unknown error')
                 st.error(f"NewsAPI Error: {error_msg}")
                 return []
-                
         except requests.exceptions.RequestException as e:
             st.error(f"Network error fetching news: {str(e)}")
             return []
@@ -203,12 +187,11 @@ class NewsClassifierApp:
             return []
     
     def save_feedback(self, original_text: str, translated_text: str, predicted_label: str, confidence: float, feedback: str):
-        """Save user feedback to CSV file"""
         try:
             timestamp = datetime.now().isoformat()
             feedback_data = [
                 timestamp,
-                original_text[:500],  # Limit text length
+                original_text[:500],
                 translated_text[:500],
                 predicted_label,
                 confidence,
@@ -228,7 +211,6 @@ class NewsClassifierApp:
             return False
     
     def display_news_classification(self, news_items: List[str]):
-        """Display classified news items with feedback options"""
         if not news_items:
             st.warning("No news articles found.")
             return
@@ -240,26 +222,21 @@ class NewsClassifierApp:
                 st.markdown(f"### خبر رقم {i}")
                 st.markdown(f"**النص الأصلي:** {news}")
                 
-                # Classify the news
                 label, translated, confidence, raw_label = self.classify_news(news)
                 
                 if translated and translated != news:
                     st.markdown(f"**الترجمة:** {translated}")
                 
-                # Display classification with color coding
                 if "حقيقي" in label:
                     st.success(f"🔎 **النتيجة:** {label} (الثقة: {confidence:.1%})")
                 else:
                     st.error(f"🔎 **النتيجة:** {label} (الثقة: {confidence:.1%})")
                 
-                # Feedback buttons
                 col1, col2, col3 = st.columns([1, 1, 2])
-                
                 with col1:
                     if st.button(f"✅ صحيح", key=f"correct_{i}"):
                         if self.save_feedback(news, translated, raw_label, confidence, "correct"):
                             st.success("تم حفظ التقييم كصحيح!")
-                
                 with col2:
                     if st.button(f"❌ خاطئ", key=f"wrong_{i}"):
                         if self.save_feedback(news, translated, raw_label, confidence, "wrong"):
@@ -267,9 +244,27 @@ class NewsClassifierApp:
                 
                 st.divider()
     
+    def classify_csv(self, df: pd.DataFrame, text_column: str) -> pd.DataFrame:
+        """Classify news in CSV file and add results columns"""
+        if text_column not in df.columns:
+            st.error(f"عمود '{text_column}' غير موجود في الملف.")
+            return df
+        
+        results = []
+        for text in df[text_column]:
+            label, translated, confidence, raw_label = self.classify_news(str(text))
+            results.append({
+                "original_text": text,
+                "translated_text": translated,
+                "predicted_label": label,
+                "confidence": confidence,
+                "raw_label": raw_label
+            })
+        
+        results_df = pd.DataFrame(results)
+        return pd.concat([df.reset_index(drop=True), results_df.drop(columns=["original_text"])], axis=1)
+    
     def run(self):
-        """Main application runner"""
-        # Page configuration
         st.set_page_config(
             page_title="NewsTruth AI",
             page_icon="📰",
@@ -277,7 +272,6 @@ class NewsClassifierApp:
             initial_sidebar_state="expanded"
         )
         
-        # Custom CSS for better styling
         st.markdown("""
         <style>
         .main-header {
@@ -285,119 +279,86 @@ class NewsClassifierApp:
             color: #1f77b4;
             padding: 1rem 0;
         }
-        .news-container {
-            border: 1px solid #ddd;
-            border-radius: 10px;
-            padding: 1rem;
-            margin: 1rem 0;
-        }
         </style>
         """, unsafe_allow_html=True)
         
-        # Main title
         st.markdown('<h1 class="main-header">📰 NewsTruth AI – تصنيف الأخبار العربية والإنجليزية</h1>', unsafe_allow_html=True)
         
-        # Sidebar
         with st.sidebar:
             st.markdown("## 👤 معلومات المطور")
             st.markdown("**Riad Karkoura**")
             st.markdown("صحفي تقني | مختص بالذكاء الاصطناعي والتحقق من الأخبار")
-            st.markdown("[🔗 LinkedIn](https://www.linkedin.com/in/riad-karkoura-b9010b196)")
-            
-            st.divider()
-            
-            # Display feedback statistics
-            if os.path.exists("data/feedback.csv"):
-                try:
-                    df = pd.read_csv("data/feedback.csv")
-                    st.markdown("## 📊 إحصائيات التقييم")
-                    st.metric("إجمالي التقييمات", len(df))
-                    if len(df) > 0:
-                        correct_count = len(df[df['user_feedback'] == 'correct'])
-                        st.metric("التقييمات الصحيحة", correct_count)
-                        st.metric("معدل الدقة", f"{correct_count/len(df)*100:.1f}%")
-                except:
-                    pass
+            st.markdown("[🔗 LinkedIn](https://www.linkedin.com/in/riad-karkoura-bc1b3122a/)")
+            st.markdown("---")
+            st.markdown("## 🗞️ خيارات الأخبار")
+            news_api_key = st.text_input("🔑 أدخل مفتاح NewsAPI", type="password")
+            news_query = st.text_input("🔍 كلمة البحث في الأخبار", value="سوريا OR Syria")
+            news_language = st.selectbox("🌐 لغة الأخبار", ["ar", "en"])
+            news_count = st.slider("📊 عدد الأخبار للتحميل", 1, 20, 5)
         
-        # Main content
-        tab1, tab2 = st.tabs(["🔍 تحليل الأخبار المباشر", "✍️ تحليل نص يدوي"])
+        app = self
         
-        with tab1:
-            st.subheader("جلب وتصنيف الأخبار من NewsAPI")
-            
-            # API Key input
-            api_key = st.text_input(
-                "🔑 أدخل مفتاح NewsAPI الخاص بك:",
-                type="password",
-                help="يمكنك الحصول على مفتاح مجاني من newsapi.org"
-            )
-            
-            if api_key:
-                col1, col2 = st.columns([2, 1])
-                
-                with col1:
-                    query = st.text_input(
-                        "🔍 اكتب كلمة بحث:",
-                        value="Syria OR vaccine",
-                        help="استخدم OR للبحث عن عدة كلمات"
-                    )
-                
-                with col2:
-                    page_size = st.selectbox("عدد الأخبار:", [3, 5, 10], index=1)
-                
-                if st.button("📡 جلب وتصنيف الأخبار", type="primary"):
-                    with st.spinner("جاري جلب وتحليل الأخبار..."):
-                        # Detect language
-                        lang = "ar" if any('\u0600' <= c <= '\u06FF' for c in query) else "en"
-                        
-                        # Fetch news
-                        news_items = self.get_latest_news(api_key, query=query, language=lang, page_size=page_size)
-                        
-                        # Display results
-                        self.display_news_classification(news_items)
+        tabs = st.tabs(["🔍 تحليل الأخبار المباشر", "✍️ تحليل نص يدوي", "📁 تحميل ملف CSV"])
+        
+        # تبويب 1: تحميل وتصنيف الأخبار من NewsAPI
+        with tabs[0]:
+            st.header("أخبار من الإنترنت (NewsAPI)")
+            if not news_api_key:
+                st.warning("يرجى إدخال مفتاح NewsAPI في الشريط الجانبي لتحميل الأخبار.")
             else:
-                st.info("يرجى إدخال مفتاح NewsAPI للمتابعة")
+                news_items = app.get_latest_news(news_api_key, news_query, news_language, news_count)
+                app.display_news_classification(news_items)
         
-        with tab2:
-            st.subheader("تصنيف نص خبر يدوي")
-            
-            user_input = st.text_area(
-                "أدخل نص الخبر هنا:",
-                height=150,
-                placeholder="اكتب أو الصق نص الخبر المراد تحليله..."
-            )
-            
-            if st.button("🔍 تحليل الخبر", type="primary"):
-                if user_input.strip():
-                    with st.spinner("جاري تحليل النص..."):
-                        label, translated, confidence, raw_label = self.classify_news(user_input)
-                        
-                        # Display results
-                        if translated and translated != user_input:
-                            st.markdown(f"**🔄 الترجمة:** {translated}")
-                        
-                        if "حقيقي" in label:
-                            st.success(f"**🔍 التصنيف:** {label} (الثقة: {confidence:.1%})")
-                        else:
-                            st.error(f"**🔍 التصنيف:** {label} (الثقة: {confidence:.1%})")
-                        
-                        # Feedback section
-                        st.subheader("📝 تقييم النتيجة")
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            if st.button("✅ التصنيف صحيح"):
-                                if self.save_feedback(user_input, translated, raw_label, confidence, "correct"):
-                                    st.success("شكراً لك! تم حفظ تقييمك.")
-                        
-                        with col2:
-                            if st.button("❌ التصنيف خاطئ"):
-                                if self.save_feedback(user_input, translated, raw_label, confidence, "wrong"):
-                                    st.warning("شكراً لك! سنعمل على تحسين النموذج.")
+        # تبويب 2: تحليل نص يدوي
+        with tabs[1]:
+            st.header("✍️ تحليل نص يدوي")
+            input_text = st.text_area("أدخل نص الخبر هنا", height=150)
+            if st.button("🔎 تصنيف النص"):
+                if not input_text.strip():
+                    st.error("الرجاء إدخال نص صحيح.")
                 else:
-                    st.warning("يرجى إدخال نص الخبر أولاً.")
+                    label, translated, confidence, raw_label = app.classify_news(input_text)
+                    if translated and translated != input_text:
+                        st.markdown(f"**الترجمة:** {translated}")
+                    if "حقيقي" in label:
+                        st.success(f"🔎 النتيجة: {label} (الثقة: {confidence:.1%})")
+                    else:
+                        st.error(f"🔎 النتيجة: {label} (الثقة: {confidence:.1%})")
+                    
+                    col1, col2, col3 = st.columns([1, 1, 2])
+                    with col1:
+                        if st.button("✅ صحيح", key="manual_correct"):
+                            if app.save_feedback(input_text, translated, raw_label, confidence, "correct"):
+                                st.success("تم حفظ التقييم كصحيح!")
+                    with col2:
+                        if st.button("❌ خاطئ", key="manual_wrong"):
+                            if app.save_feedback(input_text, translated, raw_label, confidence, "wrong"):
+                                st.warning("تم حفظ التقييم كخاطئ!")
+        
+        # تبويب 3: تحميل ملف CSV وتحليل الأخبار داخله
+        with tabs[2]:
+            st.header("📁 تحميل ملف CSV لتحليل الأخبار")
+            uploaded_file = st.file_uploader("اختر ملف CSV يحتوي عمود نص الأخبار", type=["csv"])
+            if uploaded_file:
+                try:
+                    df = pd.read_csv(uploaded_file)
+                    st.write(f"عدد الصفوف في الملف: {len(df)}")
+                    text_col = st.selectbox("اختر عمود النص لتحليله", options=df.columns)
+                    if st.button("📊 تصنيف الأخبار في الملف"):
+                        with st.spinner("جاري تصنيف الأخبار من الملف..."):
+                            result_df = app.classify_csv(df, text_col)
+                            st.dataframe(result_df)
+                            # زر لتحميل النتائج
+                            csv_exp = result_df.to_csv(index=False).encode('utf-8')
+                            st.download_button(
+                                label="⬇️ تحميل نتائج التصنيف CSV",
+                                data=csv_exp,
+                                file_name="news_classification_results.csv",
+                                mime="text/csv"
+                            )
+                except Exception as e:
+                    st.error(f"حدث خطأ أثناء قراءة الملف: {e}")
 
-# Initialize and run the app
 if __name__ == "__main__":
     app = NewsClassifierApp()
     app.run()
