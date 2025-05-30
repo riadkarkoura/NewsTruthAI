@@ -13,6 +13,14 @@ from nltk.stem import PorterStemmer
 from deep_translator import GoogleTranslator
 from transformers import pipeline
 
+# يجب استدعاء set_page_config أول شيء بعد الاستيرادات
+st.set_page_config(
+    page_title="NewsTruth AI",
+    page_icon="📰",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,10 +48,9 @@ class NewsClassifierApp:
         """Initialize translation and classification models"""
         try:
             self.translator = GoogleTranslator(source='auto', target='en')
-            # استخدام موديل مصمم لتصنيف الأخبار الحقيقي/الكاذب
             self.classifier = pipeline(
                 "text-classification",
-                model="mrm8488/bert-tiny-finetuned-fake-news",
+                model="unitary/toxic-bert",
                 device=-1,
                 return_all_scores=False
             )
@@ -112,20 +119,29 @@ class NewsClassifierApp:
             if not cleaned_text:
                 return "Error: Empty text after cleaning", "", 0.0, "ERROR"
             translated_text = self.translate_text(text)
-            input_text = translated_text[:512]
-            result = self.classifier(input_text)
+            result = self.classifier(translated_text[:512])
             if isinstance(result, list):
                 result = result[0]
             label = result.get('label', 'UNKNOWN')
             confidence = float(result.get('score', 0.0))
-            # في موديل mrm8488:
-            # labels: 'FAKE' أو 'REAL'
-            is_real = label.upper() == "REAL"
+            is_real = self.map_label_to_real(label, confidence)
             display_label = "خبر حقيقي ✅" if is_real else "خبر كاذب ❌"
             return display_label, translated_text, confidence, label
         except Exception as e:
             logger.error(f"Classification error: {e}")
             return f"Error: {str(e)}", "", 0.0, "ERROR"
+
+    def map_label_to_real(self, label: str, confidence: float) -> bool:
+        """Map model labels to real/fake classification"""
+        label = label.upper()
+        fake_labels = ['TOXIC', 'NEGATIVE', 'FAKE', 'LABEL_0']
+        real_labels = ['NON_TOXIC', 'POSITIVE', 'REAL', 'LABEL_1']
+        if label in fake_labels:
+            return False
+        elif label in real_labels:
+            return True
+        else:
+            return confidence > 0.7
 
     def get_latest_news(self, api_key: str, query: str = "news", language: str = "en", page_size: int = 5) -> List[str]:
         try:
@@ -225,68 +241,38 @@ class NewsClassifierApp:
                 "raw_label": raw_label
             })
         results_df = pd.DataFrame(results)
-        return pd.concat([df.reset_index(drop=True), results_df.drop(columns=["original_text"])], axis=1)
+        return pd.concat([df, results_df], axis=1)
 
     def run(self):
-        st.set_page_config(
-            page_title="NewsTruth AI",
-            page_icon="📰",
-            layout="wide",
-            initial_sidebar_state="expanded"
-        )
+        st.title("📰 NewsTruth AI – تصنيف الأخبار الحقيقية والكاذبة")
 
-        st.markdown("""
-        <style>
-        .main-header {
-            text-align: center;
-            color: #1f77b4;
-            padding: 1rem 0;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+        st.sidebar.header("الإعدادات")
+        api_key = st.sidebar.text_input("أدخل مفتاح API الخاص بـ NewsAPI", type="password")
+        query = st.sidebar.text_input("كلمة البحث في الأخبار", value="news")
+        language = st.sidebar.selectbox("اختر لغة الأخبار", options=["ar", "en"], index=1)
+        page_size = st.sidebar.slider("عدد الأخبار للتحميل", min_value=1, max_value=20, value=5)
 
-        st.markdown('<h1 class="main-header">📰 NewsTruth AI – تصنيف الأخبار العربية والإنجليزية</h1>', unsafe_allow_html=True)
-
-        with st.sidebar:
-            st.markdown("## 👤 معلومات المطور")
-            st.markdown("**Riad Karkoura**")
-            st.markdown("صحفي تقني | مختص بالذكاء الاصطناعي والتحقق من الأخبار")
-            st.markdown("[🔗 LinkedIn](https://www.linkedin.com/in/riad-karkoura-bc1b3122a/)")
-            st.markdown("---")
-            st.markdown("## 🗞️ خيارات الأخبار")
-            news_api_key = st.text_input("🔑 أدخل مفتاح NewsAPI", type="password")
-            news_query = st.text_input("🔍 كلمة البحث في الأخبار", value="سوريا OR Syria")
-            news_language = st.selectbox("🌐 لغة الأخبار", ["ar", "en"])
-            news_count = st.slider("📊 عدد الأخبار للتحميل", 1, 20, 5)
-
-        app = self
-
-        st.markdown("## ⚙️ تصنيف الأخبار من NewsAPI")
-        if news_api_key:
-            news_items = app.get_latest_news(news_api_key, news_query, news_language, news_count)
-            app.display_news_classification(news_items)
+        st.markdown("### تصنيف الأخبار من NewsAPI")
+        if api_key:
+            news_items = self.get_latest_news(api_key, query, language, page_size)
+            self.display_news_classification(news_items)
         else:
-            st.info("يرجى إدخال مفتاح NewsAPI لتحميل الأخبار.")
+            st.info("يرجى إدخال مفتاح API لتحميل الأخبار من NewsAPI.")
 
         st.markdown("---")
-        st.markdown("## 📄 تصنيف ملف CSV يحتوي على أخبار")
-        uploaded_file = st.file_uploader("اختر ملف CSV", type="csv")
+        st.markdown("### تصنيف الأخبار من ملف CSV")
+
+        uploaded_file = st.file_uploader("ارفع ملف CSV يحتوي على عمود نص الأخبار", type=["csv"])
         if uploaded_file:
             df = pd.read_csv(uploaded_file)
-            st.dataframe(df.head())
-            text_column = st.selectbox("اختر عمود النص", options=df.columns)
-            if st.button("🔍 تصنيف الأخبار في الملف"):
-                with st.spinner("يتم تصنيف الأخبار... يرجى الانتظار"):
-                    df_classified = app.classify_csv(df, text_column)
-                    st.success("تم التصنيف!")
-                    st.dataframe(df_classified)
-                    csv = df_classified.to_csv(index=False).encode('utf-8-sig')
-                    st.download_button(
-                        label="⬇️ تحميل النتائج CSV",
-                        data=csv,
-                        file_name="classified_news.csv",
-                        mime="text/csv"
-                    )
+            text_columns = df.columns.tolist()
+            text_column = st.selectbox("اختر عمود النص", options=text_columns)
+            if st.button("تصنيف الأخبار في الملف"):
+                with st.spinner("جاري تصنيف الأخبار..."):
+                    result_df = self.classify_csv(df, text_column)
+                    st.dataframe(result_df)
+                    csv_data = result_df.to_csv(index=False)
+                    st.download_button("تحميل الملف بعد التصنيف", data=csv_data, file_name="classified_news.csv", mime="text/csv")
 
 if __name__ == "__main__":
     app = NewsClassifierApp()
