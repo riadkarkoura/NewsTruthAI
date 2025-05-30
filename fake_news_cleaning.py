@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import re
 import nltk
+import pdfplumber
 import csv
 import os
 import logging
@@ -197,7 +198,15 @@ class NewsClassifierApp:
                 confidence,
                 feedback
             ]
-            
+            import pdfplumber
+
+with pdfplumber.open("Identify good user experience_FoodieLand.pdf") as pdf:
+    all_text = ""
+    for page in pdf.pages:
+        all_text += page.extract_text() + "\n"
+
+print(all_text)
+
             with open("data/feedback.csv", "a", newline='', encoding="utf-8") as f:
                 writer = csv.writer(f)
                 writer.writerow(feedback_data)
