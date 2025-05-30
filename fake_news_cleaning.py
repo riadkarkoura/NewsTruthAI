@@ -3,7 +3,6 @@ import requests
 import pandas as pd
 import re
 import nltk
-import pdfplumber
 import csv
 import os
 import logging
@@ -243,30 +242,7 @@ class NewsClassifierApp:
                             st.warning("تم حفظ التقييم كخاطئ!")
                 
                 st.divider()
-    def save_feedback(self, original_text: str, translated_text: str, predicted_label: str, confidence: float, feedback: str):
-    try:
-        timestamp = datetime.now().isoformat()
-        feedback_data = [
-            timestamp,
-            original_text[:500],
-            translated_text[:500],
-            predicted_label,
-            confidence,
-            feedback
-        ]
-
-        with open("data/feedback.csv", "a", newline='', encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(feedback_data)
-
-        logger.info(f"Feedback saved: {feedback}")
-        return True
-
-    except Exception as e:
-        logger.error(f"Error saving feedback: {e}")
-        st.error("Failed to save feedback. Please try again.")
-        return False
-
+    
     def classify_csv(self, df: pd.DataFrame, text_column: str) -> pd.DataFrame:
         """Classify news in CSV file and add results columns"""
         if text_column not in df.columns:
@@ -317,70 +293,36 @@ class NewsClassifierApp:
             news_api_key = st.text_input("🔑 أدخل مفتاح NewsAPI", type="password")
             news_query = st.text_input("🔍 كلمة البحث في الأخبار", value="سوريا OR Syria")
             news_language = st.selectbox("🌐 لغة الأخبار", ["ar", "en"])
-            news_count = st.slider("📊 عدد الأخبار للتحميل", 1, 20, 5)
+            news_count = st.slider("عدد الأخبار المراد جلبها", 1, 20, 5)
         
-        app = self
-        
-        tabs = st.tabs(["🔍 تحليل الأخبار المباشر", "✍️ تحليل نص يدوي", "📁 تحميل ملف CSV"])
-        
-        # تبويب 1: تحميل وتصنيف الأخبار من NewsAPI
-        with tabs[0]:
-            st.header("أخبار من الإنترنت (NewsAPI)")
+        st.markdown("## تصنيف الأخبار من NewsAPI")
+        if st.button("جلب وتصنيف الأخبار"):
             if not news_api_key:
-                st.warning("يرجى إدخال مفتاح NewsAPI في الشريط الجانبي لتحميل الأخبار.")
+                st.error("يرجى إدخال مفتاح NewsAPI.")
             else:
-                news_items = app.get_latest_news(news_api_key, news_query, news_language, news_count)
-                app.display_news_classification(news_items)
+                news_items = self.get_latest_news(news_api_key, news_query, news_language, news_count)
+                self.display_news_classification(news_items)
         
-        # تبويب 2: تحليل نص يدوي
-        with tabs[1]:
-            st.header("✍️ تحليل نص يدوي")
-            input_text = st.text_area("أدخل نص الخبر هنا", height=150)
-            if st.button("🔎 تصنيف النص"):
-                if not input_text.strip():
-                    st.error("الرجاء إدخال نص صحيح.")
-                else:
-                    label, translated, confidence, raw_label = app.classify_news(input_text)
-                    if translated and translated != input_text:
-                        st.markdown(f"**الترجمة:** {translated}")
-                    if "حقيقي" in label:
-                        st.success(f"🔎 النتيجة: {label} (الثقة: {confidence:.1%})")
-                    else:
-                        st.error(f"🔎 النتيجة: {label} (الثقة: {confidence:.1%})")
+        st.markdown("---")
+        st.markdown("## تصنيف الأخبار من ملف CSV")
+        uploaded_file = st.file_uploader("ارفع ملف CSV يحتوي على عمود نصوص الأخبار", type=["csv"])
+        
+        if uploaded_file:
+            try:
+                df = pd.read_csv(uploaded_file)
+                st.dataframe(df.head(5))
+                
+                text_col = st.selectbox("اختر عمود النص", options=df.columns)
+                
+                if st.button("تصنيف الأخبار من الملف"):
+                    classified_df = self.classify_csv(df, text_col)
+                    st.dataframe(classified_df)
                     
-                    col1, col2, col3 = st.columns([1, 1, 2])
-                    with col1:
-                        if st.button("✅ صحيح", key="manual_correct"):
-                            if app.save_feedback(input_text, translated, raw_label, confidence, "correct"):
-                                st.success("تم حفظ التقييم كصحيح!")
-                    with col2:
-                        if st.button("❌ خاطئ", key="manual_wrong"):
-                            if app.save_feedback(input_text, translated, raw_label, confidence, "wrong"):
-                                st.warning("تم حفظ التقييم كخاطئ!")
-        
-        # تبويب 3: تحميل ملف CSV وتحليل الأخبار داخله
-        with tabs[2]:
-            st.header("📁 تحميل ملف CSV لتحليل الأخبار")
-            uploaded_file = st.file_uploader("اختر ملف CSV يحتوي عمود نص الأخبار", type=["csv"])
-            if uploaded_file:
-                try:
-                    df = pd.read_csv(uploaded_file)
-                    st.write(f"عدد الصفوف في الملف: {len(df)}")
-                    text_col = st.selectbox("اختر عمود النص لتحليله", options=df.columns)
-                    if st.button("📊 تصنيف الأخبار في الملف"):
-                        with st.spinner("جاري تصنيف الأخبار من الملف..."):
-                            result_df = app.classify_csv(df, text_col)
-                            st.dataframe(result_df)
-                            # زر لتحميل النتائج
-                            csv_exp = result_df.to_csv(index=False).encode('utf-8')
-                            st.download_button(
-                                label="⬇️ تحميل نتائج التصنيف CSV",
-                                data=csv_exp,
-                                file_name="news_classification_results.csv",
-                                mime="text/csv"
-                            )
-                except Exception as e:
-                    st.error(f"حدث خطأ أثناء قراءة الملف: {e}")
+                    csv_data = classified_df.to_csv(index=False).encode('utf-8-sig')
+                    st.download_button("⬇️ تحميل النتائج", data=csv_data, file_name="classified_news.csv", mime="text/csv")
+            
+            except Exception as e:
+                st.error(f"خطأ في قراءة الملف: {e}")
 
 if __name__ == "__main__":
     app = NewsClassifierApp()
